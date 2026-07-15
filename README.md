@@ -20,7 +20,8 @@ headers, per-signal `/v1/*` paths).
   no key you keep a plain stdout `fmt` subscriber and zero network calls.
 - **Graceful shutdown** — a returned guard flushes buffered telemetry on exit.
 - **Axum helpers** (feature `axum`, on by default):
-  - `MonocleMakeSpan` — names request spans `GET /render` instead of `request`.
+  - `request_span` — names request spans `GET /render` instead of `request`
+    (a plain fn — works with **any** tower-http version).
   - `track_http_metrics` — records `http.server.request.duration`.
   - `spawn_blocking_in_span` — keeps the trace waterfall intact across
     `spawn_blocking` boundaries (so rasterize/encode/DB steps stay nested).
@@ -34,11 +35,11 @@ The lazy path — copy, paste, run. Three steps.
 ```toml
 # Cargo.toml
 [dependencies]
-monocle-agent = { git = "https://github.com/Ninhache/monocle-agent" }
+monocle-agent = "0.2"          # or: { git = "https://github.com/Ninhache/monocle-agent" }
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
-# Must be the SAME tower-http major as monocle-agent (0.5) for MonocleMakeSpan.
-tower-http = { version = "0.5", features = ["trace"] }
+# Any tower-http version works — request_span is version-agnostic.
+tower-http = { version = "0.7", features = ["trace"] }
 tracing = "0.1"
 ```
 
@@ -62,7 +63,7 @@ async fn main() {
     let app = Router::new()
         .route("/hello", get(|| async { "hello" }))
         // Names request spans "GET /hello" instead of "request".
-        .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::MonocleMakeSpan::new()))
+        .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::request_span))
         // Records http.server.request.duration for every request.
         .layer(axum::middleware::from_fn(monocle_agent::track_http_metrics));
 

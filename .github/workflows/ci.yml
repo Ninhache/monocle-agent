@@ -42,3 +42,6 @@ jobs:
 
       - name: Test
         run: cargo test --all-features --verbose
+
+      - name: Package (publish dry-run)
+        run: cargo publish --dry-run

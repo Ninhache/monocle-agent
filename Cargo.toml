@@ -1,6 +1,6 @@
 [package]
 name = "monocle-agent"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
 description = "Plug-and-play OpenTelemetry (OTLP/HTTP) exporter for Monocle — traces, metrics and logs for Rust services."
@@ -15,8 +15,8 @@ exclude = [".github/", ".env.example"]
 
 [features]
 default = ["axum"]
-# `axum` adds the HTTP metrics middleware and the request-span namer.
-axum = ["dep:axum", "dep:tower-http"]
+# `axum` adds the HTTP metrics middleware and the request-span builder.
+axum = ["dep:axum"]
 
 [dependencies]
 opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
@@ -39,9 +39,13 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 tokio = { version = "1", features = ["rt"] }
 
 axum = { version = "0.7", optional = true }
-tower-http = { version = "0.5", features = ["trace"], optional = true }
 
 [dev-dependencies]
 # Full tokio for the doctests (the runnable axum example uses #[tokio::main] +
 # tokio::net). The production dependency above stays minimal (rt only).
 tokio = { version = "1", features = ["full"] }
+# tower-http is a DEV-only dependency: it's needed to compile the doctests that
+# show `TraceLayer::new_for_http().make_span_with(request_span)`. The library
+# itself does not depend on tower-http (request_span is a plain fn), so consumers
+# may use any tower-http version.
+tower-http = { version = "0.7", features = ["trace"] }
