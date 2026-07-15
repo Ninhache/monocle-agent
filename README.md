@@ -14,38 +14,73 @@ headers, per-signal `/v1/*` paths).
 
 ## Features
 
+- **Works anywhere** — a web server, a worker, a CLI, a batch job. The default
+  install pulls **no web framework**, and you never have to write async code.
 - **One call to wire everything** — `init(config)` installs the `tracing`
   subscriber and the OTLP trace/metric/log exporters.
 - **Off by default** — nothing is exported until `MONOCLE_API_KEY` is set; with
   no key you keep a plain stdout `fmt` subscriber and zero network calls.
 - **Graceful shutdown** — a returned guard flushes buffered telemetry on exit.
-- **Axum helpers** (feature `axum`, on by default):
-  - `request_span` — names request spans `GET /render` instead of `request`
-    (a plain fn — works with **any** tower-http version).
-  - `track_http_metrics` — records `http.server.request.duration`.
-  - `spawn_blocking_in_span` — keeps the trace waterfall intact across
-    `spawn_blocking` boundaries (so rasterize/encode/DB steps stay nested).
+- **Simple custom metrics** — `counter` / `histogram` / `gauge` helpers, plus
+  re-exported `opentelemetry` / `tracing`, so you instrument without adding a
+  separately-versioned dependency of your own.
+- **Axum helpers** (feature `axum`): `request_span` (names request spans
+  `GET /render`, works with **any** tower-http version), `track_http_metrics`,
+  and `spawn_blocking_in_span` (keeps the trace waterfall across `spawn_blocking`).
+
+## Feature matrix
+
+| Feature | Adds | Pulls |
+|---------|------|-------|
+| _(default)_ | `init`, `MonocleConfig`, `TelemetryGuard`, `counter`/`histogram`/`gauge`, `spawn_blocking_in_span`, re-exports | — |
+| `axum` | `request_span`, `track_http_metrics` | `axum` |
 
 ## Getting Started
 
-The lazy path — copy, paste, run. Three steps.
-
-### 1. Add the dependencies
+### Any application (worker / CLI / batch)
 
 ```toml
-# Cargo.toml
 [dependencies]
-monocle-agent = "0.2"          # or: { git = "https://github.com/Ninhache/monocle-agent" }
-axum = "0.7"
-tokio = { version = "1", features = ["full"] }
-# Any tower-http version works — request_span is version-agnostic.
-tower-http = { version = "0.7", features = ["trace"] }
-tracing = "0.1"
+monocle-agent = "0.3"
 ```
 
-### 2. Drop this into `main.rs`
+```rust
+use std::sync::LazyLock;
+use monocle_agent::opentelemetry::metrics::Counter;
 
-A complete, runnable axum service with named request spans and HTTP metrics:
+// Build custom instruments once, reuse them.
+static JOBS: LazyLock<Counter<u64>> =
+    LazyLock::new(|| monocle_agent::counter("jobs.processed", "Jobs processed"));
+
+fn main() {
+    // env! resolves in YOUR crate. Off unless MONOCLE_API_KEY is set.
+    let telemetry = monocle_agent::init(monocle_agent::MonocleConfig::from_env(
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+    ));
+
+    monocle_agent::tracing::info_span!("process_batch").in_scope(|| {
+        // ... do work ...
+        JOBS.add(1, &[]);
+    });
+
+    telemetry.shutdown(); // flush before exit
+}
+```
+
+Instrument with the re-exported `monocle_agent::tracing` (spans/events) and the
+`counter`/`histogram`/`gauge` helpers — no `opentelemetry`/`tracing` dependency of
+your own to keep version-matched. See `examples/worker.rs`.
+
+### Web service (feature `axum`)
+
+```toml
+[dependencies]
+monocle-agent = { version = "0.3", features = ["axum"] }
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.7", features = ["trace"] }   # any version works
+```
 
 ```rust
 use axum::{routing::get, Router};
@@ -53,8 +88,6 @@ use tower_http::trace::TraceLayer;
 
 #[tokio::main]
 async fn main() {
-    // Telemetry first, so startup logs/spans are captured. Off unless
-    // MONOCLE_API_KEY is set. env! resolves in YOUR crate, not the library.
     let telemetry = monocle_agent::init(monocle_agent::MonocleConfig::from_env(
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
@@ -70,32 +103,19 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 
-    // Flush buffered telemetry before exit.
     telemetry.shutdown();
 }
 ```
 
-### 3. Point it at Monocle
+Set `MONOCLE_API_KEY` (and optionally `MONOCLE_ENV`) to export; without it the app
+runs the same, logging to stdout with no network calls.
 
-```sh
-export MONOCLE_API_KEY=your-key-here
-export MONOCLE_ENV=production          # optional (default: production)
-cargo run
-```
-
-That's it — traces, metrics and logs now flow to Monocle. Without
-`MONOCLE_API_KEY` the service runs exactly the same, logging to stdout with no
-network calls.
-
-### Keeping the waterfall intact across `spawn_blocking`
-
-Heavy work offloaded to `tokio::task::spawn_blocking` loses the tracing context,
-so its spans detach from the request. Swap in `spawn_blocking_in_span` and any
-child spans stay nested under the request in Monocle:
+**Keeping the waterfall across `spawn_blocking`** — offloaded work otherwise
+loses the tracing context:
 
 ```rust
 let bytes = monocle_agent::spawn_blocking_in_span(move || {
-    tracing::info_span!("encode").in_scope(|| encode(&frame))
+    monocle_agent::tracing::info_span!("encode").in_scope(|| encode(&frame))
 })
 .await
 .unwrap();

@@ -1,6 +1,6 @@
 [package]
 name = "monocle-agent"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.80"
 description = "Plug-and-play OpenTelemetry (OTLP/HTTP) exporter for Monocle — traces, metrics and logs for Rust services."
@@ -11,10 +11,12 @@ homepage = "https://github.com/Ninhache/monocle-agent"
 readme = "README.md"
 keywords = ["opentelemetry", "otlp", "monocle", "tracing", "observability"]
 categories = ["development-tools::debugging", "web-programming"]
-exclude = [".github/", ".env.example"]
+exclude = [".github/", ".env.example", "example-service/"]
 
 [features]
-default = ["axum"]
+# The default install is a universal telemetry core (init + config + guard +
+# metrics helpers + spawn_blocking_in_span) — no web framework. Opt into axum:
+default = []
 # `axum` adds the HTTP metrics middleware and the request-span builder.
 axum = ["dep:axum"]
 
@@ -36,8 +38,11 @@ tracing-opentelemetry = "0.33"
 # `reqwest/blocking` with NO TLS backend, so HTTPS export fails at runtime with
 # "network error". native-tls (OpenSSL on Linux) wires an explicit connector.
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "native-tls"] }
-tokio = { version = "1", features = ["rt"] }
 
+# tokio is a hard dependency: the OTLP exporter's blocking reqwest client runs a
+# background tokio runtime, so tokio is in the graph regardless. We also use it
+# for `spawn_blocking_in_span`. Only `rt` is needed here.
+tokio = { version = "1", features = ["rt"] }
 axum = { version = "0.7", optional = true }
 
 [dev-dependencies]
@@ -49,3 +54,8 @@ tokio = { version = "1", features = ["full"] }
 # itself does not depend on tower-http (request_span is a plain fn), so consumers
 # may use any tower-http version.
 tower-http = { version = "0.7", features = ["trace"] }
+
+# The axum example only compiles with the `axum` feature; `worker` needs nothing.
+[[example]]
+name = "axum_service"
+required-features = ["axum"]

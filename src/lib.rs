@@ -3,16 +3,20 @@
 //! Plug-and-play [OpenTelemetry] export to [Monocle] over OTLP/HTTP for Rust
 //! services — **traces, metrics and logs** in one call.
 //!
-//! ## Getting started
+//! Works in **any** program — a web server, a worker, a CLI, a batch job. The
+//! default install pulls no web framework; you never have to write async code.
 //!
-//! A complete, runnable axum service — copy, paste, run:
+//! ## Getting started (any application)
 //!
 //! ```no_run
-//! use axum::{routing::get, Router};
-//! use tower_http::trace::TraceLayer;
+//! use std::sync::LazyLock;
+//! use monocle_agent::opentelemetry::metrics::Counter;
 //!
-//! #[tokio::main]
-//! async fn main() {
+//! // Build custom instruments once and reuse them.
+//! static JOBS: LazyLock<Counter<u64>> =
+//!     LazyLock::new(|| monocle_agent::counter("jobs.processed", "Jobs processed"));
+//!
+//! fn main() {
 //!     // Telemetry first. Pass your crate's name/version so `env!` resolves in
 //!     // *your* crate, not this library. Off unless MONOCLE_API_KEY is set.
 //!     let telemetry = monocle_agent::init(monocle_agent::MonocleConfig::from_env(
@@ -20,42 +24,67 @@
 //!         env!("CARGO_PKG_VERSION"),
 //!     ));
 //!
-//!     let app = Router::new()
-//!         .route("/hello", get(|| async { "hello" }))
-//!         // Names request spans "GET /hello" instead of "request".
-//!         .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::request_span))
-//!         // Records http.server.request.duration for every request.
-//!         .layer(axum::middleware::from_fn(monocle_agent::track_http_metrics));
+//!     // Spans nest into a trace; metrics record against the global meter.
+//!     monocle_agent::tracing::info_span!("process_batch").in_scope(|| {
+//!         // ... do work ...
+//!         JOBS.add(1, &[]);
+//!     });
 //!
-//!     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-//!     axum::serve(listener, app).await.unwrap();
-//!
-//!     // Flush buffered telemetry before exit.
-//!     telemetry.shutdown();
+//!     telemetry.shutdown(); // flush buffered telemetry before exit
 //! }
 //! ```
 //!
-//! Then set `MONOCLE_API_KEY` and run. Export is **off by default**: nothing is
-//! sent until the key is set (or [`MonocleConfig::with_api_key`] is called); when
-//! disabled the crate still installs a stdout `fmt` subscriber and makes no
-//! network calls.
+//! Export is **off by default**: nothing is sent until `MONOCLE_API_KEY` is set
+//! (or [`MonocleConfig::with_api_key`] is called); when disabled the crate still
+//! installs a stdout `fmt` subscriber and makes no network calls. Instrument with
+//! the re-exported [`tracing`] (spans/events) and [`counter`]/[`histogram`]/
+//! [`gauge`] (or [`opentelemetry`] directly) — no separately-versioned dependency.
+//!
+//! ## Web services (feature `axum`)
+//!
+//! Enable `features = ["axum"]` for HTTP helpers:
+//!
+//! ```no_run
+//! # #[cfg(feature = "axum")] {
+//! use axum::{routing::get, Router};
+//! use tower_http::trace::TraceLayer;
+//!
+//! # async fn build() {
+//! let telemetry = monocle_agent::init(monocle_agent::MonocleConfig::from_env(
+//!     env!("CARGO_PKG_NAME"),
+//!     env!("CARGO_PKG_VERSION"),
+//! ));
+//!
+//! let app = Router::new()
+//!     .route("/hello", get(|| async { "hello" }))
+//!     // Names request spans "GET /hello" instead of "request".
+//!     .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::request_span))
+//!     // Records http.server.request.duration for every request.
+//!     .layer(axum::middleware::from_fn(monocle_agent::track_http_metrics));
+//!
+//! let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+//! axum::serve(listener, app).await.unwrap();
+//! telemetry.shutdown();
+//! # }
+//! # }
+//! ```
 //!
 //! [`request_span`] is a plain function passed to tower-http's `make_span_with`,
 //! so this crate depends on no tower-http version — it works with whatever
 //! tower-http (0.5, 0.6, 0.7, …) your service already uses.
+//!
+//! ## Features
+//!
+//! | Feature | Adds | Pulls |
+//! |---------|------|-------|
+//! | _(default)_ | `init`, [`MonocleConfig`], [`TelemetryGuard`], [`counter`]/[`histogram`]/[`gauge`], [`spawn_blocking_in_span`], re-exports | — |
+//! | `axum` | [`request_span`], [`track_http_metrics`] | `axum` |
 //!
 //! ## Configuration
 //!
 //! See [`MonocleConfig::from_env`] for the environment variables. The transport
 //! is OTLP/HTTP protobuf; the per-signal paths (`/v1/traces`, `/v1/metrics`,
 //! `/v1/logs`) are appended to the base endpoint internally.
-//!
-//! ## Axum helpers (feature `axum`, on by default)
-//!
-//! - [`request_span`] — names request spans `"<METHOD> <route>"`.
-//! - [`track_http_metrics`] — records `http.server.request.duration`.
-//! - [`spawn_blocking_in_span`] — keeps the trace waterfall intact across
-//!   `spawn_blocking` boundaries.
 //!
 //! ## Runtime requirements
 //!
@@ -69,6 +98,7 @@
 
 mod blocking;
 mod config;
+mod metrics;
 mod providers;
 
 #[cfg(feature = "axum")]
@@ -76,9 +106,21 @@ mod http;
 
 pub use blocking::spawn_blocking_in_span;
 pub use config::MonocleConfig;
+pub use metrics::{counter, gauge, histogram};
 
 #[cfg(feature = "axum")]
 pub use http::{record_http, request_span, track_http_metrics};
+
+/// Re-export of the exact `opentelemetry` version this crate builds against.
+///
+/// Use it to record custom metrics or build `KeyValue` attributes without adding
+/// a separately-versioned `opentelemetry` dependency of your own (which would
+/// have to be kept in lockstep with this crate).
+pub use opentelemetry;
+
+/// Re-export of `tracing` — create spans/events with `tracing::info_span!` /
+/// `#[tracing::instrument]` and they flow to the exporter installed by [`init`].
+pub use tracing;
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
