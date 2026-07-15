@@ -3,23 +3,45 @@
 //! Plug-and-play [OpenTelemetry] export to [Monocle] over OTLP/HTTP for Rust
 //! services — **traces, metrics and logs** in one call.
 //!
+//! ## Getting started
+//!
+//! A complete, runnable axum service — copy, paste, run:
+//!
 //! ```no_run
-//! // 1. Init as early as possible. Pass your crate's name/version so `env!`
-//! //    resolves in *your* crate, not this library.
-//! let telemetry = monocle_agent::init(monocle_agent::MonocleConfig::from_env(
-//!     env!("CARGO_PKG_NAME"),
-//!     env!("CARGO_PKG_VERSION"),
-//! ));
+//! use axum::{routing::get, Router};
+//! use tower_http::trace::TraceLayer;
 //!
-//! // 2. ... build and serve your app (e.g. with axum) ...
+//! #[tokio::main]
+//! async fn main() {
+//!     // Telemetry first. Pass your crate's name/version so `env!` resolves in
+//!     // *your* crate, not this library. Off unless MONOCLE_API_KEY is set.
+//!     let telemetry = monocle_agent::init(monocle_agent::MonocleConfig::from_env(
+//!         env!("CARGO_PKG_NAME"),
+//!         env!("CARGO_PKG_VERSION"),
+//!     ));
 //!
-//! // 3. Flush buffered telemetry before exit.
-//! telemetry.shutdown();
+//!     let app = Router::new()
+//!         .route("/hello", get(|| async { "hello" }))
+//!         // Names request spans "GET /hello" instead of "request".
+//!         .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::MonocleMakeSpan::new()))
+//!         // Records http.server.request.duration for every request.
+//!         .layer(axum::middleware::from_fn(monocle_agent::track_http_metrics));
+//!
+//!     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+//!     axum::serve(listener, app).await.unwrap();
+//!
+//!     // Flush buffered telemetry before exit.
+//!     telemetry.shutdown();
+//! }
 //! ```
 //!
-//! Export is **off by default**: nothing is sent until `MONOCLE_API_KEY` is set
-//! (or [`MonocleConfig::with_api_key`] is called). When disabled the crate still
-//! installs a stdout `fmt` subscriber and makes no network calls.
+//! Then set `MONOCLE_API_KEY` and run. Export is **off by default**: nothing is
+//! sent until the key is set (or [`MonocleConfig::with_api_key`] is called); when
+//! disabled the crate still installs a stdout `fmt` subscriber and makes no
+//! network calls.
+//!
+//! **Compatibility:** [`MonocleMakeSpan`] implements `tower-http` 0.5's
+//! `MakeSpan`, so your `TraceLayer` must come from a `tower-http` 0.5 dependency.
 //!
 //! ## Configuration
 //!

@@ -40,3 +40,8 @@ tokio = { version = "1", features = ["rt"] }
 
 axum = { version = "0.7", optional = true }
 tower-http = { version = "0.5", features = ["trace"], optional = true }
+
+[dev-dependencies]
+# Full tokio for the doctests (the runnable axum example uses #[tokio::main] +
+# tokio::net). The production dependency above stays minimal (rt only).
+tokio = { version = "1", features = ["full"] }
