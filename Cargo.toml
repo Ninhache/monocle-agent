@@ -1,0 +1,42 @@
+[package]
+name = "monocle-agent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Plug-and-play OpenTelemetry (OTLP/HTTP) exporter for Monocle — traces, metrics and logs for Rust services."
+license = "MIT"
+repository = "https://github.com/Ninhache/monocle-agent"
+documentation = "https://ninhache.github.io/monocle-agent"
+homepage = "https://github.com/Ninhache/monocle-agent"
+readme = "README.md"
+keywords = ["opentelemetry", "otlp", "monocle", "tracing", "observability"]
+categories = ["development-tools::debugging", "web-programming"]
+exclude = [".github/", ".env.example"]
+
+[features]
+default = ["axum"]
+# `axum` adds the HTTP metrics middleware and the request-span namer.
+axum = ["dep:axum", "dep:tower-http"]
+
+[dependencies]
+opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics", "logs"] }
+# The default batch span/log processors and the periodic metric reader run on a
+# dedicated OS thread with no Tokio reactor, so the OTLP HTTP export must use the
+# *blocking* reqwest client — the async `reqwest-client` panics ("no reactor
+# running") when the exporter fires off that thread.
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace", "metrics", "logs"] }
+opentelemetry-appender-tracing = "0.32"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# NB: tracing-opentelemetry 0.33 is the release paired with opentelemetry 0.32;
+# their version numbers do NOT track 1:1 — do not "align" this to 0.32.
+tracing-opentelemetry = "0.33"
+# opentelemetry-otlp's reqwest-blocking-client feature enables only
+# `reqwest/blocking` with NO TLS backend, so HTTPS export fails at runtime with
+# "network error". native-tls (OpenSSL on Linux) wires an explicit connector.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "native-tls"] }
+tokio = { version = "1", features = ["rt"] }
+
+axum = { version = "0.7", optional = true }
+tower-http = { version = "0.5", features = ["trace"], optional = true }

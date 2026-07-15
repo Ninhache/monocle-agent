@@ -1,0 +1,5 @@
+/target
+# Libraries don't commit their lockfile.
+Cargo.lock
+.env
+*.log
