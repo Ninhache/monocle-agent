@@ -1,5 +1,6 @@
-//! Axum HTTP integration: an inbound-request metrics middleware and a
-//! [`MakeSpan`] that names request spans `"<METHOD> <route>"` (e.g. `GET /render`).
+//! Axum HTTP integration: an inbound-request metrics middleware and
+//! [`request_span`], which names request spans `"<METHOD> <route>"`
+//! (e.g. `GET /render`).
 //!
 //! Only compiled with the `axum` feature (on by default).
 
@@ -11,7 +12,6 @@ use axum::middleware::Next;
 use axum::response::Response;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::KeyValue;
-use tower_http::trace::MakeSpan;
 use tracing::Span;
 
 /// Meter name for the instruments this crate owns.
@@ -62,48 +62,38 @@ pub async fn track_http_metrics(req: Request, next: Next) -> Response {
     resp
 }
 
-/// A [`tower_http::trace::MakeSpan`] that names the per-request span
-/// `"<METHOD> <route>"` (e.g. `GET /render`) instead of tower-http's static
-/// `"request"`, so traces read clearly in Monocle.
+/// Build the per-request span, named `"<METHOD> <route>"` (e.g. `GET /render`)
+/// instead of tower-http's static `"request"`, so traces read clearly in Monocle.
+///
+/// Pass it straight to tower-http's `make_span_with`:
+///
+/// ```no_run
+/// # use tower_http::trace::TraceLayer;
+/// let layer = TraceLayer::new_for_http().make_span_with(monocle_agent::request_span);
+/// ```
+///
+/// It relies on tower-http's blanket `MakeSpan` implementation for
+/// `Fn(&Request) -> Span`, so this crate depends on **no** tower-http version —
+/// it works with whatever tower-http (0.5, 0.6, 0.7, …) your service already uses.
 ///
 /// The span is created at INFO level (required so it passes the default filter
 /// and reaches the OTLP exporter) with `otel.kind = "server"` and the
 /// `http.request.method` / `http.route` semantic-convention fields. The dynamic
 /// name is carried via the special `otel.name` field understood by
 /// `tracing-opentelemetry`.
-///
-/// ```no_run
-/// # use tower_http::trace::TraceLayer;
-/// let layer = TraceLayer::new_for_http()
-///     .make_span_with(monocle_agent::MonocleMakeSpan::new());
-/// ```
-#[derive(Clone, Debug, Default)]
-pub struct MonocleMakeSpan {
-    _private: (),
-}
-
-impl MonocleMakeSpan {
-    /// Create a new request-span namer.
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl<B> MakeSpan<B> for MonocleMakeSpan {
-    fn make_span(&mut self, request: &axum::http::Request<B>) -> Span {
-        let method = request.method().clone();
-        let route = request
-            .extensions()
-            .get::<MatchedPath>()
-            .map(|m| m.as_str().to_string())
-            .unwrap_or_else(|| request.uri().path().to_string());
-        let name = format!("{} {}", method.as_str(), route);
-        tracing::info_span!(
-            "http.request",
-            otel.name = %name,
-            otel.kind = "server",
-            http.request.method = %method,
-            http.route = %route,
-        )
-    }
+pub fn request_span(request: &Request) -> Span {
+    let method = request.method().clone();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
+    let name = format!("{} {}", method.as_str(), route);
+    tracing::info_span!(
+        "http.request",
+        otel.name = %name,
+        otel.kind = "server",
+        http.request.method = %method,
+        http.route = %route,
+    )
 }

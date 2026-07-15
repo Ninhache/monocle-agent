@@ -54,3 +54,23 @@ jobs:
           gh release create "$tag" \
             --title "$tag" \
             --generate-notes
+
+      - name: Install native-tls build deps
+        if: steps.exists.outputs.exists == 'false'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.exists.outputs.exists == 'false'
+
+      - name: Publish to crates.io
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # Tolerant: if the token isn't configured yet, skip publish but keep the
+          # tag + GitHub release. Add the CARGO_REGISTRY_TOKEN secret to enable it.
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "CARGO_REGISTRY_TOKEN not set — skipping crates.io publish."
+            exit 0
+          fi
+          cargo publish

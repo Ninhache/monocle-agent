@@ -23,7 +23,7 @@
 //!     let app = Router::new()
 //!         .route("/hello", get(|| async { "hello" }))
 //!         // Names request spans "GET /hello" instead of "request".
-//!         .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::MonocleMakeSpan::new()))
+//!         .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::request_span))
 //!         // Records http.server.request.duration for every request.
 //!         .layer(axum::middleware::from_fn(monocle_agent::track_http_metrics));
 //!
@@ -40,8 +40,9 @@
 //! disabled the crate still installs a stdout `fmt` subscriber and makes no
 //! network calls.
 //!
-//! **Compatibility:** [`MonocleMakeSpan`] implements `tower-http` 0.5's
-//! `MakeSpan`, so your `TraceLayer` must come from a `tower-http` 0.5 dependency.
+//! [`request_span`] is a plain function passed to tower-http's `make_span_with`,
+//! so this crate depends on no tower-http version — it works with whatever
+//! tower-http (0.5, 0.6, 0.7, …) your service already uses.
 //!
 //! ## Configuration
 //!
@@ -51,7 +52,7 @@
 //!
 //! ## Axum helpers (feature `axum`, on by default)
 //!
-//! - [`MonocleMakeSpan`] — names request spans `"<METHOD> <route>"`.
+//! - [`request_span`] — names request spans `"<METHOD> <route>"`.
 //! - [`track_http_metrics`] — records `http.server.request.duration`.
 //! - [`spawn_blocking_in_span`] — keeps the trace waterfall intact across
 //!   `spawn_blocking` boundaries.
@@ -77,7 +78,7 @@ pub use blocking::spawn_blocking_in_span;
 pub use config::MonocleConfig;
 
 #[cfg(feature = "axum")]
-pub use http::{record_http, track_http_metrics, MonocleMakeSpan};
+pub use http::{record_http, request_span, track_http_metrics};
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
