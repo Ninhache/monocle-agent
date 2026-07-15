@@ -25,39 +25,91 @@ headers, per-signal `/v1/*` paths).
   - `spawn_blocking_in_span` — keeps the trace waterfall intact across
     `spawn_blocking` boundaries (so rasterize/encode/DB steps stay nested).
 
-## Usage
+## Getting Started
 
-Add the dependency (git until published to crates.io):
+The lazy path — copy, paste, run. Three steps.
+
+### 1. Add the dependencies
 
 ```toml
+# Cargo.toml
 [dependencies]
 monocle-agent = { git = "https://github.com/Ninhache/monocle-agent" }
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+# Must be the SAME tower-http major as monocle-agent (0.5) for MonocleMakeSpan.
+tower-http = { version = "0.5", features = ["trace"] }
+tracing = "0.1"
 ```
 
-Initialise early in `main`, hold the guard, flush on exit:
+### 2. Drop this into `main.rs`
+
+A complete, runnable axum service with named request spans and HTTP metrics:
 
 ```rust
+use axum::{routing::get, Router};
+use tower_http::trace::TraceLayer;
+
 #[tokio::main]
 async fn main() {
+    // Telemetry first, so startup logs/spans are captured. Off unless
+    // MONOCLE_API_KEY is set. env! resolves in YOUR crate, not the library.
     let telemetry = monocle_agent::init(monocle_agent::MonocleConfig::from_env(
-        env!("CARGO_PKG_NAME"),    // resolves in YOUR crate, not the library
+        env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
     ));
 
-    // ... build and serve your app ...
+    let app = Router::new()
+        .route("/hello", get(|| async { "hello" }))
+        // Names request spans "GET /hello" instead of "request".
+        .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::MonocleMakeSpan::new()))
+        // Records http.server.request.duration for every request.
+        .layer(axum::middleware::from_fn(monocle_agent::track_http_metrics));
 
-    telemetry.shutdown();          // flush buffered telemetry before exit
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+
+    // Flush buffered telemetry before exit.
+    telemetry.shutdown();
 }
 ```
 
-With axum, name request spans and record HTTP metrics:
+### 3. Point it at Monocle
+
+```sh
+export MONOCLE_API_KEY=your-key-here
+export MONOCLE_ENV=production          # optional (default: production)
+cargo run
+```
+
+That's it — traces, metrics and logs now flow to Monocle. Without
+`MONOCLE_API_KEY` the service runs exactly the same, logging to stdout with no
+network calls.
+
+### Keeping the waterfall intact across `spawn_blocking`
+
+Heavy work offloaded to `tokio::task::spawn_blocking` loses the tracing context,
+so its spans detach from the request. Swap in `spawn_blocking_in_span` and any
+child spans stay nested under the request in Monocle:
 
 ```rust
-use tower_http::trace::TraceLayer;
+let bytes = monocle_agent::spawn_blocking_in_span(move || {
+    tracing::info_span!("encode").in_scope(|| encode(&frame))
+})
+.await
+.unwrap();
+```
 
-let app = router
-    .layer(TraceLayer::new_for_http().make_span_with(monocle_agent::MonocleMakeSpan::new()))
-    .layer(axum::middleware::from_fn(monocle_agent::track_http_metrics));
+### Configuration via builder
+
+`from_env` is enough for most services, but everything is overridable:
+
+```rust
+let cfg = monocle_agent::MonocleConfig::from_env("my-service", "1.2.3")
+    .with_environment("staging")
+    .with_endpoint("http://localhost:4318")     // e.g. a local OTLP collector
+    .with_resource_attribute("team", "platform");
+let telemetry = monocle_agent::init(cfg);
 ```
 
 ## Configuration
