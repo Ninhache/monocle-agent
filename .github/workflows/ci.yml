@@ -43,5 +43,11 @@ jobs:
       - name: Test
         run: cargo test --all-features --verbose
 
+      - name: Example service — clippy + integration test
+        working-directory: example-service
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo test --verbose
+
       - name: Package (publish dry-run)
         run: cargo publish --dry-run

@@ -1,0 +1,19 @@
+[package]
+name = "monocle-agent-example-service"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Runnable example service for monocle-agent — copy it as a starting point."
+
+[dependencies]
+# Copying this as a base? Replace the path with a version:
+#   monocle-agent = { version = "0.3", features = ["axum"] }
+monocle-agent = { path = "..", features = ["axum"] }
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.7", features = ["trace"] }
+
+[dev-dependencies]
+# `tower::ServiceExt::oneshot` drives the router in the integration test without
+# binding a real socket.
+tower = { version = "0.5", features = ["util"] }

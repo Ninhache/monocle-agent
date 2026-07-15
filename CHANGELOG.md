@@ -10,6 +10,23 @@ creates the matching `vX.Y.Z` tag and GitHub release (see
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Changed
+
+- **Breaking:** `axum` is no longer a default feature. The default install is a
+  universal telemetry core (`init`, `MonocleConfig`, `TelemetryGuard`, metric
+  helpers, `spawn_blocking_in_span`) with no web framework. Web services opt in
+  with `features = ["axum"]`.
+
+### Added
+
+- `counter` / `histogram` / `gauge` helpers to record custom metrics without
+  naming `opentelemetry`.
+- Re-exports `monocle_agent::opentelemetry` and `monocle_agent::tracing` (exact
+  matching versions) for custom instrumentation with no extra dependency.
+- `examples/worker.rs` — a non-web, non-async usage example.
+
 ## [0.2.0]
 
 ### Changed
@@ -36,6 +53,7 @@ creates the matching `vX.Y.Z` tag and GitHub release (see
 - Axum feature: `MonocleMakeSpan` (named request spans), `track_http_metrics`
   (`http.server.request.duration`), and `spawn_blocking_in_span`.
 
-[Unreleased]: https://github.com/Ninhache/monocle-agent/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Ninhache/monocle-agent/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Ninhache/monocle-agent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ninhache/monocle-agent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Ninhache/monocle-agent/releases/tag/v0.1.0
