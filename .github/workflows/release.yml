@@ -1,8 +1,13 @@
 name: Release
 
-# Cut a tag + GitHub release automatically whenever the crate version on `main`
-# changes. `main` is protected, so this only fires on reviewed merges — that is
-# the whole point of protecting the branch.
+# Cut a crates.io release + tag + GitHub release automatically whenever the crate
+# version on `main` changes. `main` is protected, so this only fires on reviewed
+# merges — that is the whole point of protecting the branch.
+#
+# Order matters: we publish to crates.io FIRST, then create the tag + GitHub
+# release. That way a failed publish leaves no tag behind, so once the cause is
+# fixed a re-run retries cleanly (a tag would otherwise make the run a no-op and
+# "burn" the version).
 
 on:
   push:
@@ -17,9 +22,12 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  tag:
-    name: tag-and-release
+  release:
+    name: publish-tag-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +51,22 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create tag and release
+      - name: Install native-tls build deps
+        if: steps.exists.outputs.exists == 'false'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.exists.outputs.exists == 'false'
+
+      # Publish FIRST — if this fails, no tag/release is created and a re-run
+      # retries cleanly. Requires the CARGO_REGISTRY_TOKEN secret.
+      - name: Publish to crates.io
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
+
+      - name: Create tag and GitHub release
         if: steps.exists.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,23 +77,3 @@ jobs:
           gh release create "$tag" \
             --title "$tag" \
             --generate-notes
-
-      - name: Install native-tls build deps
-        if: steps.exists.outputs.exists == 'false'
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
-
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.exists.outputs.exists == 'false'
-
-      - name: Publish to crates.io
-        if: steps.exists.outputs.exists == 'false'
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          # Tolerant: if the token isn't configured yet, skip publish but keep the
-          # tag + GitHub release. Add the CARGO_REGISTRY_TOKEN secret to enable it.
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "CARGO_REGISTRY_TOKEN not set — skipping crates.io publish."
-            exit 0
-          fi
-          cargo publish
